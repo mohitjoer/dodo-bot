@@ -2,16 +2,35 @@ import os
 import discord
 import requests
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from flask import Flask, jsonify
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Optional for higher rate limits
+PORT = int(os.getenv("PORT", 5000))  # Render provides PORT env variable
 
+# Flask app for health checks
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 GitHub Discord Bot is running!"
+
+@app.route('/health')
+def health():
+    """Health check endpoint for keeping the bot alive"""
+    return jsonify({
+        "status": "healthy",
+        "bot_status": "online" if bot.is_ready() else "offline",
+        "timestamp": datetime.utcnow().isoformat(),
+        "guilds": len(bot.guilds) if bot.is_ready() else 0
+    })
 
 class GitHubBot(commands.Bot):
     def __init__(self):
@@ -44,9 +63,7 @@ class GitHubBot(commands.Bot):
         except Exception as e:
             print(f"❌ Failed to sync commands to new guild {guild.name}: {e}")
 
-
 bot = GitHubBot()
-
 
 def extract_github_username(text):
     """Extract username from GitHub URL or return the text as-is"""
@@ -104,8 +121,6 @@ async def github_request(url):
         print(f"GitHub API Error: {e}")
         return None
 
-
-
 @bot.tree.command(name="ping", description="Test if the bot is working")
 async def ping(interaction: discord.Interaction):
     """Simple ping command to test bot functionality"""
@@ -143,7 +158,6 @@ async def github_user(interaction: discord.Interaction, username: str):
     embed.add_field(name="🏢 Company", value=data.get('company', 'N/A'), inline=True)
     embed.add_field(name="📅 Joined", value=format_date(data.get('created_at')), inline=True)
     
-   
     socials = []
     if data.get('blog'):
         socials.append(f"🌐 [Website]({data['blog']})")
@@ -193,10 +207,8 @@ async def github_repo(interaction: discord.Interaction, repo: str):
     embed.add_field(name="📅 Created", value=format_date(data['created_at']), inline=True)
     embed.add_field(name="🔄 Updated", value=format_date(data['updated_at']), inline=True)
     
-   
     license_info = data.get('license')
     embed.add_field(name="📄 License", value=license_info['name'] if license_info else 'N/A', inline=True)
-    
     
     topics = data.get('topics', [])
     if topics:
@@ -379,7 +391,6 @@ async def github_trending(interaction: discord.Interaction, language: str = None
     """Show trending repositories"""
     await interaction.response.defer()
     
-  
     if period == "weekly":
         date = (datetime.now() - timedelta(weeks=1)).strftime('%Y-%m-%d')
     elif period == "monthly":
@@ -417,7 +428,6 @@ async def github_trending(interaction: discord.Interaction, language: str = None
     
     await interaction.followup.send(embed=embed)
 
-
 @bot.tree.command(name="sync_commands", description="Manually sync commands to this server (Admin only)")
 @app_commands.default_permissions(administrator=True)
 async def sync_commands(interaction: discord.Interaction):
@@ -429,7 +439,6 @@ async def sync_commands(interaction: discord.Interaction):
         await interaction.followup.send(f"✅ Successfully synced {len(synced)} commands to this server!", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to sync commands: {e}", ephemeral=True)
-
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -445,6 +454,10 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         )
         print(f"Command error: {error}")
 
+def run_flask():
+    """Run Flask server in a separate thread"""
+    app.run(host='0.0.0.0', port=PORT, debug=False)
+
 # Run the bot
 if __name__ == "__main__":
     if not TOKEN:
@@ -452,5 +465,12 @@ if __name__ == "__main__":
         print("Please add DISCORD_TOKEN to your .env file")
         exit(1)
     
-    print("🚀 Starting GitHub Discord Bot...")
+    print("🚀 Starting GitHub Discord Bot with Keep-Alive...")
+    
+    # Start Flask server in a separate thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    print(f"🌐 Flask health server started on port {PORT}")
+    
+    # Start Discord bot
     bot.run(TOKEN)
