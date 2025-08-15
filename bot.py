@@ -8,26 +8,22 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
-# Load environment variables
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # Optional for higher rate limits
 
-# Bot setup
+
 class GitHubBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         super().__init__(command_prefix='!', intents=intents)
         
-        # GitHub API headers
         self.github_headers = {}
         if GITHUB_TOKEN:
             self.github_headers['Authorization'] = f'token {GITHUB_TOKEN}'
     
     async def setup_hook(self):
-        # This runs before the bot is ready
         print("🔧 Setting up commands...")
-        # Sync commands to all guilds the bot is in
         for guild in self.guilds:
             try:
                 synced = await self.tree.sync(guild=guild)
@@ -48,10 +44,10 @@ class GitHubBot(commands.Bot):
         except Exception as e:
             print(f"❌ Failed to sync commands to new guild {guild.name}: {e}")
 
-# Create bot instance
+
 bot = GitHubBot()
 
-# Helper functions
+
 def extract_github_username(text):
     """Extract username from GitHub URL or return the text as-is"""
     if text.startswith("http"):
@@ -108,7 +104,7 @@ async def github_request(url):
         print(f"GitHub API Error: {e}")
         return None
 
-# Slash Commands
+
 
 @bot.tree.command(name="ping", description="Test if the bot is working")
 async def ping(interaction: discord.Interaction):
@@ -147,7 +143,7 @@ async def github_user(interaction: discord.Interaction, username: str):
     embed.add_field(name="🏢 Company", value=data.get('company', 'N/A'), inline=True)
     embed.add_field(name="📅 Joined", value=format_date(data.get('created_at')), inline=True)
     
-    # Add social links if available
+   
     socials = []
     if data.get('blog'):
         socials.append(f"🌐 [Website]({data['blog']})")
@@ -197,11 +193,11 @@ async def github_repo(interaction: discord.Interaction, repo: str):
     embed.add_field(name="📅 Created", value=format_date(data['created_at']), inline=True)
     embed.add_field(name="🔄 Updated", value=format_date(data['updated_at']), inline=True)
     
-    # License info
+   
     license_info = data.get('license')
     embed.add_field(name="📄 License", value=license_info['name'] if license_info else 'N/A', inline=True)
     
-    # Topics
+    
     topics = data.get('topics', [])
     if topics:
         embed.add_field(name="🏷️ Topics", value=', '.join(topics[:5]), inline=False)
@@ -383,12 +379,12 @@ async def github_trending(interaction: discord.Interaction, language: str = None
     """Show trending repositories"""
     await interaction.response.defer()
     
-    # Calculate date for trending
+  
     if period == "weekly":
         date = (datetime.now() - timedelta(weeks=1)).strftime('%Y-%m-%d')
     elif period == "monthly":
         date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    else:  # daily
+    else: 
         date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
     search_query = f"q=created:>{date}"
@@ -421,7 +417,7 @@ async def github_trending(interaction: discord.Interaction, language: str = None
     
     await interaction.followup.send(embed=embed)
 
-# Add a manual sync command for administrators
+
 @bot.tree.command(name="sync_commands", description="Manually sync commands to this server (Admin only)")
 @app_commands.default_permissions(administrator=True)
 async def sync_commands(interaction: discord.Interaction):
@@ -434,7 +430,7 @@ async def sync_commands(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to sync commands: {e}", ephemeral=True)
 
-# Error handling
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.CommandOnCooldown):
