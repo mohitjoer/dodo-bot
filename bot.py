@@ -296,8 +296,8 @@ def run_flask():
 
 async def start_bot_with_retry():
     """Start bot with exponential backoff retry logic"""
-    max_retries = 5
-    base_delay = 30
+    max_retries = 3  # Reduced retries
+    base_delay = 300  # Start with 5 minutes for rate limits
     
     for attempt in range(max_retries):
         try:
@@ -305,25 +305,33 @@ async def start_bot_with_retry():
             await bot.start(TOKEN)
             break
         except discord.errors.HTTPException as e:
-            if "429" in str(e) or "Too Many Requests" in str(e):
+            error_msg = str(e)
+            logger.error(f"Discord HTTP Error: {error_msg}")
+            
+            if "429" in error_msg or "Too Many Requests" in error_msg or "rate limit" in error_msg.lower():
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"⏰ Rate limited! Waiting {delay} seconds before retry {attempt + 2}...")
+                    # For rate limits, wait longer
+                    delay = base_delay + (attempt * 300)  # 5, 10, 15 minutes
+                    logger.warning(f"⏰ Discord rate limited! Waiting {delay//60} minutes before retry {attempt + 2}...")
                     await asyncio.sleep(delay)
                 else:
-                    logger.error("❌ Max retries reached. Bot failed to start due to rate limiting.")
-                    raise
+                    logger.error("❌ Max retries reached. Discord rate limiting persists.")
+                    # Don't exit completely, keep Flask running
+                    logger.info("🌐 Keeping Flask server alive for health checks...")
+                    return
             else:
-                logger.error(f"❌ HTTP Error: {e}")
-                raise
+                logger.error(f"❌ Other Discord error: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(60)
+                else:
+                    raise
         except Exception as e:
             logger.error(f"❌ Unexpected error: {e}")
             if attempt < max_retries - 1:
-                delay = base_delay
-                logger.warning(f"⏰ Retrying in {delay} seconds...")
-                await asyncio.sleep(delay)
+                await asyncio.sleep(60)
             else:
-                raise
+                logger.error("❌ Bot failed to start, but keeping Flask alive")
+                return
 
 # Main execution
 if __name__ == "__main__":
@@ -340,7 +348,7 @@ if __name__ == "__main__":
     logger.info(f"🌐 Flask health server started on port {PORT}")
     
     # Add a small delay before starting Discord bot
-    time.sleep(2)
+    time.sleep(5)
     
     # Start Discord bot with retry logic
     try:
@@ -348,5 +356,12 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
-        exit(1)
+        logger.error(f"❌ Bot startup error: {e}")
+    
+    # Keep Flask server running even if Discord bot fails
+    logger.info("🌐 Flask server continues running for health checks...")
+    try:
+        while True:
+            time.sleep(60)  # Keep main thread alive
+    except KeyboardInterrupt:
+        logger.info("🛑 Application stopped by user")
