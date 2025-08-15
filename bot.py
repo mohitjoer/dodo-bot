@@ -3,6 +3,7 @@ import discord
 import requests
 import asyncio
 import threading
+import time
 from datetime import datetime, timedelta
 from discord import app_commands
 from discord.ext import commands
@@ -458,6 +459,37 @@ def run_flask():
     """Run Flask server in a separate thread"""
     app.run(host='0.0.0.0', port=PORT, debug=False)
 
+async def start_bot_with_retry():
+    """Start bot with exponential backoff retry logic"""
+    max_retries = 5
+    base_delay = 30  # Start with 30 seconds
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Starting bot (attempt {attempt + 1}/{max_retries})")
+            await bot.start(TOKEN)
+            break  # If successful, break out of retry loop
+        except discord.errors.HTTPException as e:
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"⏰ Rate limited! Waiting {delay} seconds before retry {attempt + 2}...")
+                    await asyncio.sleep(delay)
+                else:
+                    print("❌ Max retries reached. Bot failed to start due to rate limiting.")
+                    raise
+            else:
+                print(f"❌ HTTP Error: {e}")
+                raise
+        except Exception as e:
+            print(f"❌ Unexpected error: {e}")
+            if attempt < max_retries - 1:
+                delay = base_delay
+                print(f"⏰ Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                raise
+
 # Run the bot
 if __name__ == "__main__":
     if not TOKEN:
@@ -472,5 +504,14 @@ if __name__ == "__main__":
     flask_thread.start()
     print(f"🌐 Flask health server started on port {PORT}")
     
-    # Start Discord bot
-    bot.run(TOKEN)
+    # Add a small delay before starting Discord bot
+    time.sleep(5)
+    
+    # Start Discord bot with retry logic
+    try:
+        asyncio.run(start_bot_with_retry())
+    except KeyboardInterrupt:
+        print("🛑 Bot stopped by user")
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
+        exit(1)
