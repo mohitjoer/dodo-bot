@@ -1,7 +1,8 @@
 name: Keep Bot Alive
+
 on:
   schedule:
-    - cron: '*/10 * * * *'  # Every 10 minutes
+    - cron: '*/20 * * * *'  # Every 20 minutes (less aggressive)
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
@@ -10,11 +11,29 @@ jobs:
     steps:
       - name: Ping Bot Health Endpoint
         run: |
-          curl -f https://your-render-app.onrender.com/health
-        env:
-          # Add your Render app URL in repository secrets if needed
-          BOT_URL: ${{ secrets.BOT_URL }}
+          # Use timeout and retry logic
+          for i in {1..3}; do
+            if curl -f --connect-timeout 10 --max-time 30 https://your-render-app.onrender.com/health; then
+              echo "✅ Bot health check successful on attempt $i"
+              break
+            else
+              echo "⚠️ Health check failed on attempt $i"
+              if [ $i -eq 3 ]; then
+                echo "❌ All health check attempts failed"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
       
-      - name: Log Response
+      - name: Log Success
+        if: success()
         run: |
-          echo "Bot pinged successfully at $(date)"
+          echo "✅ Bot pinged successfully at $(date)"
+          echo "📊 Health endpoint is responding normally"
+      
+      - name: Log Failure
+        if: failure()
+        run: |
+          echo "❌ Bot health check failed at $(date)"
+          echo "🔧 Check your Render deployment and logs"
