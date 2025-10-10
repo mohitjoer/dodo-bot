@@ -9,21 +9,14 @@ A Discord bot that integrates with GitHub to provide user profile information an
 - 🚀 **Render Optimized**: Specifically configured for reliable Render.com deployment
 - ⚡ **Slash Commands**: Modern Discord slash command interface
 - 🛡️ **Rate Limit Handling**: Smart GitHub API rate limit management
-- 📊 **Connection Monitoring**: Automatic reconnection and error recovery
-
 ## 🤖 Available Commands
 
 | Command | Description | Usage |
 |---------|-------------|-------|
 | `/ping` | Test bot connectivity and check latency | `/ping` |
 | `/github_user` | Get detailed GitHub user profile | `/github_user username:octocat` |
+| `/github_repo` | Get GitHub repository details (stars, forks, issues, license, topics) | `/github_repo repo:octocat/Hello-World` |
 | `/sync_commands` | Manually sync commands (Admin only) | `/sync_commands` |
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.10 or higher
 - Discord Bot Token
 - GitHub Personal Access Token (optional, but recommended for higher rate limits)
 - Discord Server (Guild) ID
