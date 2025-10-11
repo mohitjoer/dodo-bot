@@ -364,7 +364,7 @@ async def github_user(interaction: discord.Interaction, username: str):
             embed.add_field(name="🔗 Links", value=" | ".join(socials), inline=False)
         
         await interaction.followup.send(embed=embed)
-        
+
     except Exception as e:
         logger.error(f"github_user command error: {e}")
         try:
@@ -372,14 +372,79 @@ async def github_user(interaction: discord.Interaction, username: str):
         except:
             pass
 
-# Add the sync command for testing
+@bot.tree.command(name="github_repo", description="Get GitHub repository details")
+@app_commands.describe(repo="owner/repo or repository URL")
+async def github_repo(interaction: discord.Interaction, repo: str):
+    """Fetch and display GitHub repository details with robust handling"""
+    try:
+        await interaction.response.defer()
+
+        parsed = extract_github_repo(repo)
+        if not parsed:
+            await interaction.followup.send("❌ Please provide a valid repository in the form `owner/repo` or a GitHub URL.")
+            return
+
+        owner, name = parsed
+        data = await github_request(f"https://api.github.com/repos/{owner}/{name}")
+
+        if data == "rate_limited":
+            await interaction.followup.send("❌ GitHub API rate limit exceeded. Please try again later.")
+            return
+        elif data == "not_found":
+            await interaction.followup.send(f"❌ Repository **{owner}/{name}** not found on GitHub")
+            return
+        elif not data:
+            await interaction.followup.send(f"❌ Failed to fetch data for **{owner}/{name}**")
+            return
+
+        description = data.get('description') or 'No description provided.'
+        embed = discord.Embed(
+            title=f"{owner}/{name}",
+            url=data.get('html_url', f"https://github.com/{owner}/{name}"),
+            description=description,
+            color=0x0d1117
+        )
+
+        if data.get('owner', {}).get('avatar_url'):
+            embed.set_thumbnail(url=data['owner']['avatar_url'])
+
+        # Key stats
+        embed.add_field(name="⭐ Stars", value=format_number(data.get('stargazers_count', 0)), inline=True)
+        embed.add_field(name="🍴 Forks", value=format_number(data.get('forks_count', 0)), inline=True)
+        embed.add_field(name="🐛 Open Issues", value=format_number(data.get('open_issues_count', 0)), inline=True)
+
+        # Meta
+        embed.add_field(name="🗣️ Language", value=data.get('language', 'N/A'), inline=True)
+        embed.add_field(name="📄 License", value=(data.get('license') or {}).get('name', 'N/A'), inline=True)
+        embed.add_field(name="🕒 Updated", value=format_date(data.get('updated_at')), inline=True)
+
+        # Optional links
+        links = []
+        if data.get('homepage'):
+            links.append(f"🌐 [Homepage]({data['homepage']})")
+        links.append(f"📦 [Repo]({data.get('html_url', f'https://github.com/{owner}/{name}')} )")
+        embed.add_field(name="🔗 Links", value=" | ".join(links), inline=False)
+
+        # Topics
+        topics = data.get('topics') or []
+        if topics:
+            embed.add_field(name="🏷️ Topics", value=", ".join(topics[:10]), inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"github_repo command error: {e}")
+        try:
+            await interaction.followup.send("❌ An error occurred while fetching repository data.")
+        except:
+            pass
+
 @bot.tree.command(name="sync_commands", description="Manually sync commands to this server (Admin only)")
 @app_commands.default_permissions(administrator=True)
 async def sync_commands(interaction: discord.Interaction):
     """Manual command sync for administrators"""
     try:
         await interaction.response.defer(ephemeral=True)
-        
         if GUILD_ID and interaction.guild and interaction.guild.id == GUILD_ID:
             synced = await bot.tree.sync(guild=interaction.guild)
             await interaction.followup.send(f"✅ Successfully synced {len(synced)} commands to your server!", ephemeral=True)
