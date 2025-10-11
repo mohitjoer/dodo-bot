@@ -73,13 +73,11 @@ Maintainers who do not follow or enforce the Code of Conduct in good faith may f
 
 ## 🚨 Reporting Issues
 
-If you experience or witness unacceptable behavior, please report it by contacting the maintainers through:
+If you experience or witness unacceptable behavior, please report it via:
 
-📧 **Email:** [your-email@example.com]  
-(Replace this with your preferred contact email.)
+**Contact:** Please report any incidents via the [GitHub Issues](https://github.com/mohitjoer/dodo-bot/issues) page.
 
-All complaints will be reviewed and investigated promptly and fairly.
-
+All complaints will be reviewed and investigated promptly and fairly.  
 Maintainers are obligated to respect the privacy and security of the reporter of any incident.
 
 ---
