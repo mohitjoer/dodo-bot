@@ -445,24 +445,24 @@ async def github_repo(interaction: discord.Interaction, repo: str):
     repo="owner/repo or GitHub URL (supports /tree/branch/subpath)",
     max_depth="Maximum depth to display (default 3)"
 )
-async def github_tree(interaction: discord.Interaction, repo: str, max_depth: int = 3):
+async def github_tree(interaction: discord.Interaction, repo: str, max_depth: int = 5):
     """Fetch and display GitHub repository file tree with size constraint."""
     try:
         await interaction.response.defer()
 
-        # ------------------ CONFIG / CONSTANTS ------------------
+        # CONFIG / CONSTANTS
         EMBED_COLOR = 0x000000          # define a default embed color (Discord blurple)
         MAX_PATH_LIMIT = 5000           # maximum number of paths we'll process
-        MAX_EMBEDS = 2                  # how many embed parts to allow before fallback
+        MAX_EMBEDS = 4                 # how many embed parts to allow before fallback
         # Discord embed field limit ~1024 chars; keep a safe margin for code fences and other text
-        MAX_FIELD_VALUE = 1024 - 12
+        MAX_FIELD_VALUE = 1024 - 15
         # Use a default chunk size not exceeding the safe field value
         MAX_CONTENT_CHARS = min(750, MAX_FIELD_VALUE)
 
         branch = None
         subpath = ""
 
-        # ------------------ 1. PARSE REPOSITORY INPUT ------------------
+        # PARSE REPOSITORY INPUT
         from urllib.parse import urlparse
 
         if repo.startswith("http"):
@@ -482,7 +482,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             await interaction.followup.send("❌ Invalid repository format. Use `owner/repo` or a GitHub URL.")
             return
 
-        # ------------------ 2. FETCH REPO METADATA AND TREE ------------------
+        # TREE
         repo_data = await github_request(f"https://api.github.com/repos/{owner}/{name}")
         if repo_data == "not_found":
             await interaction.followup.send("❌ Repository not found.")
@@ -509,7 +509,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             await interaction.followup.send("❌ Failed to fetch repository tree (unexpected API response).")
             return
 
-        # ------------------ 3. PATH LIMIT CHECK AND FILTERING ------------------
+        # PATH LIMIT CHECK AND FILTERING 
         all_paths = [item["path"] for item in tree_data.get("tree", []) if item.get("type") in ("blob", "tree")]
 
         if not all_paths:
@@ -543,7 +543,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             await interaction.followup.send(f"❌ No files or directories found in `{owner}/{name}/{subpath}`.")
             return
 
-        # ------------------ 4. TREE FORMATTING LOGIC ------------------
+        # TREE FORMATTING LOGIC 
         def format_tree(paths_list, max_depth=3):
             tree_dict = {}
             for p in paths_list:
@@ -594,7 +594,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
 
         tree_lines = format_tree(paths, max_depth=max_depth)
 
-        # ------------------ 5. CHUNKING & TRUNCATION ------------------
+        #CHUNKING & TRUNCATION maybe some fixes has to be done here later!
         chunks = []
         current_chunk = []
         current_len = 0
@@ -624,7 +624,6 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             else:
                 chunks[-1] = chunks[-1] + trunc_msg
 
-        # Safety: if any chunk is still longer than embed field safe value, fallback to file
         if any(len(c) + 10 > MAX_FIELD_VALUE for c in chunks):
             import io
             file_content = "\n".join(tree_lines)
@@ -637,7 +636,6 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             )
             return
 
-        # ------------------ 6. BUILD EMBEDS ------------------
         embeds_to_send = []
         repo_url = f"https://github.com/{owner}/{name}"
         author_url = f"https://github.com/{owner}/{name}/tree/{branch}/{subpath}" if subpath else f"https://github.com/{owner}/{name}/tree/{branch}"
@@ -670,7 +668,6 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             embed.timestamp = discord.utils.utcnow()
             embeds_to_send.append(embed)
 
-        # ------------------ 7. SAFE SEND: first embed then remaining; fallback combined file on any failure ------------------
         if not embeds_to_send:
             await interaction.followup.send(f"❌ No content to display for `{owner}/{name}`.")
             return
@@ -681,7 +678,6 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
         try:
             await interaction.followup.send(embeds=[embeds_to_send[0]])
         except Exception as e:
-            # If first embed fails, send full tree as a single file
             print("Error sending first embed:", e)
             traceback.print_exc()
             file_content = "\n".join(tree_lines)
@@ -694,7 +690,6 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             )
             return
 
-        # Send remaining embeds one-by-one; if any fails, combine failed + all remaining into one file and send it
         for i, embed in enumerate(embeds_to_send[1:], start=1):
             try:
                 await interaction.followup.send(embeds=[embed])
@@ -703,14 +698,10 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
                 print(f"Error sending embed part {i+1}:", send_err)
                 traceback.print_exc()
 
-                # Build combined text from the failed part and all remaining parts (preserve order)
                 remaining_chunks = []
-                # include failed chunk (which corresponds to chunks[i])
-                # reconstruct from chunks list (i corresponds to chunks index i)
                 try:
                     remaining_chunks = chunks[i:]  # from failed part to end
                 except Exception:
-                    # fallback: include everything not yet sent
                     remaining_chunks = ["(Could not reconstruct chunk text)"]
 
                 combined_text = "\n\n--- Part Break ---\n\n".join(remaining_chunks)
@@ -736,6 +727,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
         traceback.print_exc()
         print(f"---------------------------------")
         await interaction.followup.send("❌ An unexpected internal error occurred while fetching the repository tree. Check bot logs for details.")
+
 
 
 
