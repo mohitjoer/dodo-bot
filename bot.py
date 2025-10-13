@@ -138,26 +138,16 @@ class RenderOptimizedBot(commands.Bot):
             logger.info("🔄 Delaying command sync for Render environment...")
     
     async def _sync_commands(self):
-        if not self.target_guild_id:
+        """Separate method for command syncing"""
+        if self.target_guild_id:
+            guild = discord.Object(id=self.target_guild_id)
+            try:
+                synced = await self.tree.sync(guild=guild)
+                logger.info(f"✅ Synced {len(synced)} commands to guild {self.target_guild_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to sync commands: {e}")
+        else:
             logger.warning("⚠️ GUILD_ID not set, skipping command sync")
-            return
-        guild = discord.Object(id=self.target_guild_id)
-        try:
-            # CRITICAL: Copy all globally-defined commands to the target guild before syncing.
-            # This ensures commands appear instantly in the test guild if they were defined globally.
-            logger.info("DEBUG: Copying global commands to guild %s before sync...", self.target_guild_id)
-            self.tree.copy_global_to(guild=guild)
-            
-            synced = await self.tree.sync(guild=guild)
-            logger.info(
-                "✅ Synced %s commands to guild %s: %s", 
-                len(synced), 
-                self.target_guild_id, 
-                [c.name for c in synced]
-            )
-        except Exception as e:
-            # Use logger.exception to log the full traceback for better debugging
-            logger.exception("❌ Failed to sync commands:")
 
     async def on_ready(self):
         logger.info(f"🚀 Bot ready! {self.user} connected to Discord")
@@ -460,29 +450,31 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
     try:
         await interaction.response.defer()
 
-        # Parse GitHub URL or owner/repo
+        # --- Parsing and API Calls (Unchanged) ---
         branch = None
         subpath = ""
-        parsed = None
 
         if repo.startswith("http"):
             url_parts = urlparse(repo).path.strip("/").split("/")
             if len(url_parts) >= 2:
                 owner, name = url_parts[:2]
-                # check for /tree/{branch}/{path}
                 if len(url_parts) >= 4 and url_parts[2] == "tree":
                     branch = url_parts[3]
-                    subpath = "/".join(url_parts[4:])  # optional subpath
+                    subpath = "/".join(url_parts[4:])
+                elif len(url_parts) == 2 or url_parts[2] == "blob":
+                     pass
+                else:
+                    await interaction.followup.send("❌ Invalid GitHub URL format. Use `owner/repo` or a URL containing `/tree/`.")
+                    return
             else:
                 await interaction.followup.send("❌ Invalid GitHub URL.")
                 return
         elif "/" in repo:
             owner, name = repo.split("/")[:2]
         else:
-            await interaction.followup.send("❌ Invalid repository format.")
+            await interaction.followup.send("❌ Invalid repository format. Use `owner/repo` or a GitHub URL.")
             return
 
-        # Fetch repository info for default branch if not specified
         repo_data = await github_request(f"https://api.github.com/repos/{owner}/{name}")
         if not repo_data or repo_data in ["rate_limited", "not_found"]:
             msg = "❌ Repository not found or rate limited." if repo_data == "not_found" else "❌ GitHub API rate limit exceeded."
@@ -490,19 +482,33 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             return
         branch = branch or repo_data.get("default_branch", "main")
 
-        # Fetch full tree recursively
-        tree_data = await github_request(f"https://api.github.com/repos/{owner}/{name}/git/trees/{branch}?recursive=1")
+        tree_url = f"https://api.github.com/repos/{owner}/{name}/git/trees/{branch}?recursive=1"
+        tree_data = await github_request(tree_url)
+        
         if not tree_data or tree_data in ["rate_limited", "not_found"]:
             msg = "❌ Failed to fetch tree or rate limited." if tree_data != "rate_limited" else "❌ GitHub API rate limit exceeded."
             await interaction.followup.send(msg)
             return
+        
+        if tree_data.get("truncated"):
+            await interaction.followup.send("⚠️ The repository tree is too large for a full recursive fetch. Displaying partial results.")
 
-        # Filter by type and optional subpath
-        paths = [item['path'] for item in tree_data.get("tree", []) if item['type'] in ["blob", "tree"]]
+        # Filter to include BOTH files ("blob") and directories ("tree")
+        all_paths = [item['path'] for item in tree_data.get("tree", []) if item.get('type') in ["blob", "tree"]]
+        
+        paths = []
         if subpath:
-            paths = [p[len(subpath)+1:] for p in paths if p.startswith(subpath + "/")]
-
-        # Build visual tree (FIXED LOGIC)
+            filtered_paths = [p for p in all_paths if p.startswith(subpath)]
+            if not any(p.startswith(subpath + "/") for p in filtered_paths) and subpath not in all_paths:
+                 await interaction.followup.send(f"❌ Subpath `{subpath}` not found or is a dead end.")
+                 return
+            paths = [p[len(subpath)+1:] for p in filtered_paths if p.startswith(subpath + "/")]
+        else:
+            paths = all_paths
+        
+        # ----------------------------------------------------------------------
+        ## FIX 1: Corrected format_tree function with reliable spacing
+        # ----------------------------------------------------------------------
         def format_tree(paths, max_depth=3):
             tree_dict = {}
             for p in paths:
@@ -510,85 +516,101 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
                 current = tree_dict
                 for i, part in enumerate(parts):
                     if i >= max_depth:
-                        current[part] = "..."
+                        if isinstance(current, dict) and part not in current:
+                             current[part] = "..."
                         break
                     
                     if part not in current:
-                        # Initialize as an empty dictionary. It will remain this way if it's a file
-                        # or become a non-empty dictionary if a subdirectory is found.
                         current[part] = {}
                     
-                    # Prevent continuing into '...' placeholder
-                    current = current.get(part, {}) if current.get(part) != "..." else {}
+                    if current[part] != "...":
+                        current = current[part]
+                    
+                    if i == len(parts) - 1:
+                        break
 
             lines = []
             def build_lines(d, prefix=""):
                 # Sort keys: directories first, then files, both alphabetically
                 def sort_key(item):
                     key, value = item
-                    # Directories are True, Files are False. Sorted reverse (True first).
                     is_dir = isinstance(value, dict) and value != {}
-                    return (not is_dir, key) 
+                    return (not is_dir, key.lower()) 
                 
                 sorted_items = sorted(d.items(), key=sort_key)
 
-                for key, value in sorted_items:
+                for i, (key, value) in enumerate(sorted_items):
                     
-                    is_file = value == {}
                     is_directory = isinstance(value, dict) and value != {}
                     is_truncated = value == "..."
+                    is_last = (i == len(sorted_items) - 1)
                     
-                    # Only append '/' for directories or truncated paths
+                    # Choose correct line characters
+                    connector = "└── " if is_last else "├── "
+                    
+                    # FIX: Use consistent ASCII spaces for indentation
+                    next_prefix = prefix + ("    " if is_last else "│   ")
+                    
                     suffix = "/" if is_directory or is_truncated else ""
                     
-                    if is_truncated:
-                         # For truncated paths, we show the path component followed by /...
-                        lines.append(f"{prefix}├─ {key}/...")
-                    else: # File or directory
-                        lines.append(f"{prefix}├─ {key}{suffix}")
-                        if is_directory:
-                            build_lines(value, prefix + "│   ")
-            
+                    lines.append(f"{prefix}{connector}{key}{suffix}")
+                    
+                    if is_directory and value:
+                        build_lines(value, next_prefix)
+
+            # Determine the root name for the first line
+            root_name = f"{owner}/{name}/tree/{branch}/{subpath}" if subpath else f"{owner}/{name}/tree/{branch}"
+            lines.append(f"📦 {root_name}")
             build_lines(tree_dict)
             return lines
 
         tree_lines = format_tree(paths, max_depth=max_depth)
 
-        # Split into chunks for embeds
-        MAX_EMBEDS = 2
-        MAX_CHARS = 1024
+
+        # --- Embed Creation and Sending Fix (Collects all embeds into a list) ---
+            
+        # --- Embed Creation and Sending Fix (Collects all embeds into a list) ---
+                
+        MAX_EMBEDS = 10
+        # Use a slightly smaller, safer limit for chunk content (1024 - markup - small safety buffer)
+        MAX_CONTENT_CHARS = 1000 
+                
         chunks = []
         current_chunk = []
+                
+        # 1. Chunk the lines
         for line in tree_lines:
-            if sum(len(l)+1 for l in current_chunk) + len(line)+1 > MAX_CHARS:
+            # A line can't be added if it's longer than the entire chunk size
+            if len(line) > MAX_CONTENT_CHARS:
+                line = line[:MAX_CONTENT_CHARS - 5] + "..." # Truncate the ridiculously long line
+
+            # Check if adding the new line exceeds the chunk limit
+            if sum(len(l)+1 for l in current_chunk) + len(line)+1 > MAX_CONTENT_CHARS:
                 chunks.append("\n".join(current_chunk))
                 current_chunk = []
             current_chunk.append(line)
         if current_chunk:
             chunks.append("\n".join(current_chunk))
+        # 2. Enforce MAX_EMBEDS limit
         if len(chunks) > MAX_EMBEDS:
             chunks = chunks[:MAX_EMBEDS]
-            chunks[-1] += "\n… (tree truncated)"
+            chunks[-1] += "\n… (Output truncated by Discord embed limit)"
 
-        # Send embeds
+        # 3. Prepare common embed data (Unchanged)
         repo_url = f"https://github.com/{owner}/{name}"
-        
-        # Determine the base path for the Author URL
         author_url_path = f"{owner}/{name}/tree/{branch}/{subpath}" if subpath else f"{owner}/{name}/tree/{branch}"
         author_url = f"https://github.com/{author_url_path}"
-        
-        # Use a more appropriate success color (e.g., Green: 0x2ECC71)
         EMBED_COLOR = 0x2ECC71
+        
+        embeds_to_send = []
 
+        # 4. Create and collect embeds (Unchanged)
         for idx, chunk in enumerate(chunks, start=1):
             embed = discord.Embed(
-                # Use a simple, descriptive title
                 title=f"File Tree for {owner}/{name}",
-                # The primary description should go here if there's any non-tree summary.
-                # Since the chunk is the main content, we'll keep it in the field.
                 description=f"**Branch:** `{branch}` **Path:** `/{subpath if subpath else ''}`",
                 color=EMBED_COLOR,
-                url=repo_url, # Make the main title a link to the repo
+                url=repo_url, 
             )
             
             embed.set_author(
@@ -598,24 +620,37 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
 
             embed.add_field(
                 name=f"Tree Structure (Max Depth: {max_depth}) – Part {idx}/{len(chunks)}",
-                value=f"```text\n{chunk}\n```",
+                value=f"```fix\n{chunk}\n```", 
                 inline=False
             )
             
             embed.set_footer(
-                text=f"Requested by {interaction.user.display_name} | {len(paths)} total files/dirs",
+                text=f"Requested by {interaction.user.display_name} | {len(all_paths)} total files/dirs",
                 icon_url=interaction.user.display_avatar.url
             )
             
-            # Add the timestamp
             embed.timestamp = discord.utils.utcnow()
+            
+            embeds_to_send.append(embed)
 
-            await interaction.followup.send(embed=embed)
+        # 5. SEND ALL COLLECTED EMBEDS IN A SINGLE MESSAGE (Unchanged)
+        if embeds_to_send:
+            await interaction.followup.send(embeds=embeds_to_send)
+        else:
+            await interaction.followup.send(f"❌ No files or directories found for `{owner}/{name}` at branch `{branch}` and path `/{subpath}`.")
+
 
     except Exception as e:
-        # Ensure you have a logger defined
-        # logger.error(f"github_tree command error: {e}") 
-        await interaction.followup.send("❌ An error occurred while fetching repository tree.")
+        # Generic error handler (left for diagnostic purposes)
+        # ----------------------------------------------------------------------
+        import traceback
+        print(f"--- GITHUB TREE COMMAND ERROR ---")
+        print(f"Repo: {repo}, User: {interaction.user.display_name}")
+        traceback.print_exc()
+        print(f"---------------------------------")
+        
+        await interaction.followup.send("❌ An unexpected internal error occurred while fetching the repository tree. Check bot logs for details.")
+
 
 
 @bot.tree.command(name="sync_commands", description="Manually sync commands to this server (Admin only)")
