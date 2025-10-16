@@ -443,7 +443,7 @@ async def github_repo(interaction: discord.Interaction, repo: str):
 @bot.tree.command(name="github_tree", description="Show GitHub repository file tree")
 @app_commands.describe(
     repo="owner/repo or GitHub URL (supports /tree/branch/subpath)",
-    max_depth="Maximum depth to display (default 3)"
+    max_depth="Maximum depth to display (default 5)"
 )
 async def github_tree(interaction: discord.Interaction, repo: str, max_depth: int = 5):
     """Fetch and display GitHub repository file tree with size constraint."""
