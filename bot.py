@@ -656,7 +656,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             )
 
             embed.add_field(
-                name=f"Tree Structure (Max Depth: {max_depth}) – Part {idx}/{total_parts}",
+                name=f"Tree Structure (Max Depth: {max_depth}) - Part {idx}/{total_parts}",
                 value=f"```fix\n{chunk}\n```",
                 inline=False
             )
