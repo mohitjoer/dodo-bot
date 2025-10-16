@@ -730,6 +730,60 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
 
 
 
+@bot.tree.command(name="github_search", description="Search for GitHub repositories by criteria")
+@app_commands.describe(query="Search query, e.g., language:python stars:>1000")
+async def github_search(interaction: discord.Interaction, query: str):
+    """Search GitHub repositories with enhanced error handling"""
+    try:
+        await interaction.response.defer()
+
+        # Construct the search URL
+        search_url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=5"
+
+        data = await github_request(search_url)
+
+        if data == "rate_limited":
+            await interaction.followup.send("❌ GitHub API rate limit exceeded. Please try again later.")
+            return
+        elif not data or not data.get("items"):
+            await interaction.followup.send(f"❌ No repositories found for query: **{query}**")
+            return
+        elif data.get("incomplete_results", False):
+            logger.warning("GitHub search returned incomplete results")
+
+        # Create embed for results
+        embed = discord.Embed(
+            title=f"🔍 GitHub Repository Search Results for '{query}'",
+            description=f"Showing top {len(data['items'])} results:",
+            color=0x238636
+        )
+
+        for i, repo in enumerate(data["items"], start=1):
+            name = repo.get("name", "N/A")
+            owner = repo.get("owner", {}).get("login", "N/A")
+            full_name = f"{owner}/{name}"
+            description = repo.get("description", "No description available.")[:200] + "..." if len(repo.get("description", "")) > 200 else repo.get("description", "No description available.")
+            stars = format_number(repo.get("stargazers_count", 0))
+            language = repo.get("language", "N/A")
+            repo_url = repo.get("html_url", "")
+
+            # Add each result as a field
+            embed.add_field(
+                name=f"{i}. {full_name}",
+                value=f"⭐ {stars} | 🗣️ {language}\n{description}\n🔗 [View Repo]({repo_url})",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Total results: {data.get('total_count', 0)} | Powered by GitHub API")
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"github_search command error: {e}")
+        try:
+            await interaction.followup.send("❌ An error occurred while searching repositories.")
+        except:
+            pass
 
 @bot.tree.command(name="sync_commands", description="Manually sync commands to this server (Admin only)")
 @app_commands.default_permissions(administrator=True)
