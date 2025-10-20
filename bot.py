@@ -345,6 +345,7 @@ async def github_user(interaction: discord.Interaction, username: str):
             color=0x238636
         )
         
+
         embed.set_thumbnail(url=data['avatar_url'])
         embed.add_field(name="👤 Username", value=f"[{username}]({data['html_url']})", inline=True)
         embed.add_field(name="📦 Public Repos", value=format_number(data.get('public_repos', 0)), inline=True)
@@ -352,6 +353,7 @@ async def github_user(interaction: discord.Interaction, username: str):
         embed.add_field(name="👤 Following", value=format_number(data.get('following', 0)), inline=True)
         embed.add_field(name="📍 Location", value=data.get('location', 'N/A'), inline=True)
         embed.add_field(name="🏢 Company", value=data.get('company', 'N/A'), inline=True)
+        embed.add_field(name="📜 Public Gists", value=format_number(data.get('public_gists', 0)), inline=True)
         embed.add_field(name="📅 Joined", value=format_date(data.get('created_at')), inline=True)
         
         socials = []
@@ -412,6 +414,8 @@ async def github_repo(interaction: discord.Interaction, repo: str):
         embed.add_field(name="⭐ Stars", value=format_number(data.get('stargazers_count', 0)), inline=True)
         embed.add_field(name="🍴 Forks", value=format_number(data.get('forks_count', 0)), inline=True)
         embed.add_field(name="🐛 Open Issues", value=format_number(data.get('open_issues_count', 0)), inline=True)
+        embed.add_field(name="👀 Watchers", value=format_number(data.get('subscribers_count', 0)), inline=True)
+        embed.add_field(name="📅 Created", value=format_date(data.get('created_at')), inline=True)
 
         # Meta
         embed.add_field(name="🗣️ Language", value=data.get('language', 'N/A'), inline=True)
@@ -729,7 +733,60 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
         await interaction.followup.send("❌ An unexpected internal error occurred while fetching the repository tree. Check bot logs for details.")
 
 
+@bot.tree.command(name="github_commits", description="Get the 5 most recent commits for a repo")
+@app_commands.describe(repo="owner/repo or repository URL")
+async def github_commits(interaction: discord.Interaction, repo: str):
+    try:
+        await interaction.response.defer()
 
+        parsed = extract_github_repo(repo)
+        if not parsed:
+            await interaction.followup.send("❌ Please provide a valid repository in the form `owner/repo` or a GitHub URL.")
+            return
+        
+        owner, name = parsed
+
+        # 2. Call the API for commits
+        url = f"https://api.github.com/repos/{owner}/{name}/commits?per_page=5"
+        data = await github_request(url)
+
+        # 3. Handle errors
+        if data == "rate_limited":
+            await interaction.followup.send("❌ GitHub API rate limit exceeded. Please try again later.")
+            return
+        elif data == "not_found" or not data:
+            await interaction.followup.send(f"❌ No commits found for **{owner}/{name}**.")
+            return
+
+        # 4. Build the embed
+        embed = discord.Embed(
+            title=f"Recent Commits for {owner}/{name}",
+            url=f"https://github.com/{owner}/{name}/commits",
+            color=0x171515 # A dark color for commits
+        )
+
+        description_lines = []
+        for commit in data:
+            sha = commit.get('sha', '')[:7]
+            message = commit.get('commit', {}).get('message', 'No commit message').split('\n')[0]
+            author = commit.get('commit', {}).get('author', {}).get('name', 'N/A')
+            commit_url = commit.get('html_url', '#')
+            
+            # Format: `[sha_link](url)` - `Message` (Author)
+            description_lines.append(
+                f"[`{sha}`]({commit_url}) - `{message}` ({author})"
+            )
+
+        embed.description = "\n".join(description_lines)
+        embed.set_footer(text=f"Showing the 5 most recent commits")
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logger.error(f"github_commits command error: {e}")
+        await interaction.followup.send("❌ An error occurred while fetching commits.")
+
+        
 @bot.tree.command(name="github_search", description="Search for GitHub repositories by criteria")
 @app_commands.describe(query="Search query, e.g., language:python stars:>1000")
 async def github_search(interaction: discord.Interaction, query: str):
