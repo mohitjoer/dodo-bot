@@ -17,8 +17,6 @@ A Discord bot that integrates with GitHub to provide user profile information an
 | `/github_user` | Get detailed GitHub user profile | `/github_user username:octocat` |
 | `/github_repo` | Get GitHub repository details (stars, forks, issues, license, topics) | `/github_repo repo:octocat/Hello-World` |
 | `/github_tree` | Display the GitHub repository file tree (supports branch and subpath) | `/github_tree repo:owner/repo max_depth:5` |
-| `/github_commits` | Displays the 5 most recent commits from a specified GitHub repository | `/github_commits repo:owner/repo` |
-
 | `/sync_commands` | Manually sync commands (Admin only) | `/sync_commands` |
 - Discord Bot Token
 - GitHub Personal Access Token (optional, but recommended for higher rate limits)
