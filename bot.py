@@ -778,7 +778,7 @@ async def github_commits(interaction: discord.Interaction, repo: str):
             )
 
         embed.description = "\n".join(description_lines)
-        embed.set_footer(text=f"Showing the 5 most recent commits")
+        embed.set_footer(text="Showing the 5 most recent commits")
 
         await interaction.followup.send(embed=embed)
 
@@ -786,7 +786,7 @@ async def github_commits(interaction: discord.Interaction, repo: str):
         logger.error(f"github_commits command error: {e}")
         await interaction.followup.send("❌ An error occurred while fetching commits.")
 
-        
+
 @bot.tree.command(name="github_search", description="Search for GitHub repositories by criteria")
 @app_commands.describe(query="Search query, e.g., language:python stars:>1000")
 async def github_search(interaction: discord.Interaction, query: str):
