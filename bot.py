@@ -40,6 +40,7 @@ if IS_RENDER:
 
 # Flask app for health checks
 app = Flask(__name__)
+bot = None  # Initialize bot variable
 
 @app.route('/')
 def home():
@@ -53,7 +54,7 @@ def health():
         guild_count = 0
         target_guild = "not_connected"
         
-        if hasattr(bot, 'is_ready') and bot.is_ready():
+        if bot and hasattr(bot, 'is_ready') and bot.is_ready():
             bot_status = "online"
             guild_count = len(bot.guilds) if hasattr(bot, 'guilds') else 0
             
@@ -204,9 +205,6 @@ class RenderOptimizedBot(commands.Bot):
             await self.session.close()
         await super().close()
 
-# Initialize bot
-bot = RenderOptimizedBot()
-
 def extract_github_username(text):
     """Extract username from GitHub URL or return the text as-is"""
     if text.startswith("http"):
@@ -247,7 +245,7 @@ def format_number(num):
 
 async def github_request(url):
     """GitHub API request with enhanced error handling for Render"""
-    if not bot.session or bot.session.closed:
+    if not bot or not bot.session or bot.session.closed:
         logger.error("Session not available for GitHub request")
         return None
     
@@ -284,6 +282,9 @@ async def github_request(url):
     except Exception as e:
         logger.error(f"GitHub API Error: {e}")
         return None
+
+# Initialize bot after defining the class
+bot = RenderOptimizedBot()
 
 @bot.tree.command(name="ping", description="Test if the bot is working")
 async def ping(interaction: discord.Interaction):
@@ -422,7 +423,7 @@ async def github_repo(interaction: discord.Interaction, repo: str):
         links = []
         if data.get('homepage'):
             links.append(f"🌐 [Homepage]({data['homepage']})")
-        links.append(f"📦 [Repo]({data.get('html_url', f'https://github.com/{owner}/{name}')} )")
+        links.append(f"📦 [Repo]({data.get('html_url', f'https://github.com/{owner}/{name}')})")
         embed.add_field(name="🔗 Links", value=" | ".join(links), inline=False)
 
         # Topics
@@ -592,7 +593,7 @@ async def github_tree(interaction: discord.Interaction, repo: str, max_depth: in
             build_lines(tree_dict)
             return lines
 
-        tree_lines = format_tree(paths, max_depth=max_depth)
+        tree_lines = format_tree(paths, max_depth)
 
         #CHUNKING & TRUNCATION maybe some fixes has to be done here later!
         chunks = []
@@ -753,8 +754,8 @@ async def github_search(interaction: discord.Interaction, query: str):
 
         # Create embed for results
         embed = discord.Embed(
-            title=f"🔍 GitHub Repository Search Results for '{query}'",
-            description=f"Showing top {len(data['items'])} results:",
+            title=f"🔍 GitHub Repository Search Results",
+            description=f"Query: `{query}`\nShowing top {len(data['items'])} results:",
             color=0x238636
         )
 
@@ -762,7 +763,9 @@ async def github_search(interaction: discord.Interaction, query: str):
             name = repo.get("name", "N/A")
             owner = repo.get("owner", {}).get("login", "N/A")
             full_name = f"{owner}/{name}"
-            description = repo.get("description", "No description available.")[:200] + "..." if len(repo.get("description", "")) > 200 else repo.get("description", "No description available.")
+            description = repo.get("description", "No description available.")
+            if len(description) > 200:
+                description = description[:200] + "..."
             stars = format_number(repo.get("stargazers_count", 0))
             language = repo.get("language", "N/A")
             repo_url = repo.get("html_url", "")
