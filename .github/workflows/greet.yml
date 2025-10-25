@@ -1,0 +1,28 @@
+name: Greet on new issues
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  
+    steps:
+      - name: Checkout (not strictly required, but habit)
+        uses: actions/checkout@v4
+
+      - name: Post welcome comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const author = context.payload.issue.user?.login || 'there';
+            const body = `Hi @${author} 👋\n\nThanks for opening this issue — the maintainers will take a look soon. If you can, please add steps to reproduce and any relevant logs / screenshots.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body
+            });
