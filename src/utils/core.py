@@ -4,6 +4,7 @@ import asyncio
 from discord.ext import commands
 import logging
 import time
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ class RenderOptimizedBot(commands.Bot):
         # connection monitoring
         self.last_heartbeat = time.time()
         self.connection_issues = 0
+        # command sync tracking
+        self._commands_synced = False
 
     async def setup_hook(self):
         logger.info("🔧 Setting up bot session...")
@@ -63,9 +66,15 @@ class RenderOptimizedBot(commands.Bot):
             headers=self.github_headers
         )
 
-        # don't sync commands immediately on Render; cogs can call sync if needed
+        # helper utility to make sure commands successfully connect to Discord
+        registered = list(self.tree.get_commands())
+        logger.info(f"🔎 Currently {len(registered)} app commands registered on the tree")
+
         if not self.IS_RENDER:
-            await self._sync_commands()
+            if registered:
+                await self._sync_commands()
+            else:
+                logger.info("🔄 No commands found during setup_hook — deferring command sync to on_ready")
         else:
             logger.info("🔄 Delaying command sync for Render environment...")
 
@@ -73,6 +82,9 @@ class RenderOptimizedBot(commands.Bot):
         if self.target_guild_id:
             guild = discord.Object(id=self.target_guild_id)
             try:
+                # Log what commands the tree currently exposes for debugging
+                available = list(self.tree.get_commands())
+                logger.info(f"🔎 About to sync {len(available)} commands: {[c.name for c in available]}")
                 synced = await self.tree.sync(guild=guild)
                 logger.info(f"✅ Synced {len(synced)} commands to guild {self.target_guild_id}")
             except Exception as e:
@@ -88,10 +100,32 @@ class RenderOptimizedBot(commands.Bot):
             target_guild = self.get_guild(self.target_guild_id)
             if target_guild:
                 logger.info(f"✅ Connected to target guild: {target_guild.name}")
-                if self.IS_RENDER and not self.startup_complete:
+
+                # Ensure commands are synced after cogs have been loaded.
+                # There is a startup race where setup_hook can run before
+                # extensions are loaded in some deployment flows. Run a
+                # guarded sync here once per startup to avoid syncing too
+                # early and ending up with 0 commands registered.
+                if not self._commands_synced:
                     logger.info("🔄 Syncing commands after successful connection...")
-                    await asyncio.sleep(5)
-                    await self._sync_commands()
+                    # small delay to allow any external cog loading to finish
+                    await asyncio.sleep(3)
+                    # diagnostic: list what Discord currently has registered for this
+                    # application's guild commands before we attempt to sync
+                    try:
+                        await self._log_guild_commands()
+                    except Exception as e:
+                        logger.debug(f"Could not list guild commands before sync: {e}")
+                    try:
+                        await self._sync_commands()
+                        # diagnostic: inspect guild commands after syncing as well
+                        try:
+                            await self._log_guild_commands()
+                        except Exception as e:
+                            logger.debug(f"Could not list guild commands after sync: {e}")
+                        self._commands_synced = True
+                    except Exception as e:
+                        logger.error(f"❌ Command sync after ready failed: {e}")
             else:
                 logger.warning(f"⚠️ Not in target guild {self.target_guild_id}")
 
@@ -105,6 +139,53 @@ class RenderOptimizedBot(commands.Bot):
 
         self.startup_complete = True
         self.last_heartbeat = time.time()
+
+    async def _log_guild_commands(self):
+        """Fetch and log the application's guild commands from Discord REST API.
+
+        This helps debug when tree.sync reports zero changes but commands are
+        not visible in the client — it shows what Discord actually has
+        registered for the application in the target guild.
+        """
+        if not self.target_guild_id:
+            logger.info("🔍 No target guild id set; skipping guild command listing")
+            return
+
+        try:
+            app_info = await self.application_info()
+            app_id = getattr(app_info, 'id', None)
+            if not app_id:
+                logger.warning("🔍 Could not determine application id for diagnostics")
+                return
+
+            url = f"https://discord.com/api/v10/applications/{app_id}/guilds/{self.target_guild_id}/commands"
+            token = os.getenv('DISCORD_TOKEN')
+            if not token:
+                logger.warning("🔍 DISCORD_TOKEN not available in environment for diagnostic request")
+                return
+
+            headers = {"Authorization": f"Bot {token}"}
+
+            # Use our existing aiohttp session (created in setup_hook) if available
+            session = self.session or aiohttp.ClientSession()
+            close_session = self.session is None
+
+            async with session.get(url, headers=headers) as resp:
+                try:
+                    data = await resp.json()
+                except Exception:
+                    text = await resp.text()
+                    logger.error(f"🔍 Failed to parse guild commands response (status={resp.status}): {text}")
+                    return
+
+            if isinstance(data, list):
+                names = [c.get('name') for c in data]
+                logger.info(f"🔍 Discord guild has {len(data)} registered app commands: {names}")
+            else:
+                logger.info(f"🔍 Unexpected guild commands payload: {data}")
+
+        except Exception as e:
+            logger.error(f"🔍 Error while fetching guild commands: {e}")
 
     async def on_resumed(self):
         logger.info("🔄 Bot resumed connection")
