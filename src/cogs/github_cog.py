@@ -3,6 +3,8 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 
+from urllib.parse import quote_plus
+
 from src.utils.github_utils import (
     extract_github_username,
     extract_github_repo,
@@ -132,6 +134,7 @@ class GitHubCog(commands.Cog):
     async def github_search(self, interaction: discord.Interaction, query: str):
         try:
             await interaction.response.defer()
+            q = quote_plus(query, safe=":+-><=")
             search_url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=5"
             data = await github_request(self.bot, search_url)
 
