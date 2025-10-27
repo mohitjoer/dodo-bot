@@ -6,11 +6,6 @@ import threading
 import logging
 from dotenv import load_dotenv
 import discord
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
-
 from src.utils.core import RenderOptimizedBot
 from src.utils.web_server import create_flask_app
 
