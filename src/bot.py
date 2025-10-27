@@ -5,12 +5,8 @@ import asyncio
 import threading
 import logging
 from dotenv import load_dotenv
-
 import discord
-from discord import app_commands
 
-# Ensure project root is on sys.path before importing local `src.*` modules when running
-# this file directly (python src/bot.py).
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -18,8 +14,6 @@ if ROOT not in sys.path:
 from src.utils.core import RenderOptimizedBot
 from src.utils.web_server import create_flask_app
 
-# When running this file directly (python src/bot.py) ensure the project root is on sys.path
-# so imports like `from src.utils...` work. This is a lightweight fallback for dev runs.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -53,7 +47,6 @@ def run_flask(bot_instance):
 async def start_bot(bot_instance):
     try:
         logger.info("🔄 Starting Discord bot...")
-        # load cogs as extensions (they expose async setup(bot))
         try:
             await bot_instance.load_extension('src.cogs.github_cog')
         except Exception as e:
@@ -90,12 +83,10 @@ def main():
 
     bot = RenderOptimizedBot(guild_id=GUILD_ID, github_token=GITHUB_TOKEN, is_render=IS_RENDER)
 
-    # Start Flask server in a daemon thread
     flask_thread = threading.Thread(target=run_flask, args=(bot,), daemon=True)
     flask_thread.start()
     logger.info(f"🌐 Flask health server started on port {PORT}")
 
-    # Small delay for Flask to start
     time.sleep(1)
 
     try:
