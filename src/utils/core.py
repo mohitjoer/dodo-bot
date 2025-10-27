@@ -102,23 +102,16 @@ class RenderOptimizedBot(commands.Bot):
                 logger.info(f"✅ Connected to target guild: {target_guild.name}")
 
                 # Ensure commands are synced after cogs have been loaded.
-                # There is a startup race where setup_hook can run before
-                # extensions are loaded in some deployment flows. Run a
-                # guarded sync here once per startup to avoid syncing too
-                # early and ending up with 0 commands registered.
+
                 if not self._commands_synced:
                     logger.info("🔄 Syncing commands after successful connection...")
-                    # small delay to allow any external cog loading to finish
                     await asyncio.sleep(3)
-                    # diagnostic: list what Discord currently has registered for this
-                    # application's guild commands before we attempt to sync
                     try:
                         await self._log_guild_commands()
                     except Exception as e:
                         logger.debug(f"Could not list guild commands before sync: {e}")
                     try:
                         await self._sync_commands()
-                        # diagnostic: inspect guild commands after syncing as well
                         try:
                             await self._log_guild_commands()
                         except Exception as e:
@@ -141,12 +134,7 @@ class RenderOptimizedBot(commands.Bot):
         self.last_heartbeat = time.time()
 
     async def _log_guild_commands(self):
-        """Fetch and log the application's guild commands from Discord REST API.
-
-        This helps debug when tree.sync reports zero changes but commands are
-        not visible in the client — it shows what Discord actually has
-        registered for the application in the target guild.
-        """
+        # diagnostic to list what Discord commands are in synced
         if not self.target_guild_id:
             logger.info("🔍 No target guild id set; skipping guild command listing")
             return
@@ -166,16 +154,14 @@ class RenderOptimizedBot(commands.Bot):
 
             headers = {"Authorization": f"Bot {token}"}
 
-            # Use our existing aiohttp session (created in setup_hook) if available
             session = self.session or aiohttp.ClientSession()
-            close_session = self.session is None
 
             async with session.get(url, headers=headers) as resp:
                 try:
                     data = await resp.json()
                 except Exception:
                     text = await resp.text()
-                    logger.error(f"🔍 Failed to parse guild commands response (status={resp.status}): {text}")
+                    logger.exception(f"🔍 Failed to parse guild commands response (status={resp.status}): {text}")
                     return
 
             if isinstance(data, list):
@@ -184,8 +170,11 @@ class RenderOptimizedBot(commands.Bot):
             else:
                 logger.info(f"🔍 Unexpected guild commands payload: {data}")
 
+            if self.session is None:
+                await session.close()
+
         except Exception as e:
-            logger.error(f"🔍 Error while fetching guild commands: {e}")
+            logger.exception(f"🔍 Error while fetching guild commands: {e}")
 
     async def on_resumed(self):
         logger.info("🔄 Bot resumed connection")
