@@ -131,11 +131,11 @@ class AdminCog(commands.Cog):
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            logger.error(f"help command error: {e}")
+            logger.exception("help command error")
             try:
                 await interaction.followup.send("❌ An error occurred while displaying help.")
-            except:
-                pass
+            except Exception:
+                logger.debug("Failed to send error message to user")
 
     @app_commands.command(name="sync_commands", description="Manually sync commands globally (Admin only)")
     @app_commands.default_permissions(administrator=True)

@@ -86,7 +86,7 @@ class RenderOptimizedBot(commands.Bot):
             synced = await self.tree.sync()
             logger.info(f"✅ Synced {len(synced)} commands globally")
         except Exception as e:
-            logger.error(f"❌ Failed to sync commands: {e}")
+            logger.exception("❌ Failed to sync commands")
 
     async def on_ready(self):
         logger.info(f"🚀 Bot ready! {self.user} connected to Discord")
@@ -104,18 +104,18 @@ class RenderOptimizedBot(commands.Bot):
             logger.info("🔄 Syncing commands globally after successful connection...")
             await asyncio.sleep(3)
             try:
-                await self._log_guild_commands()
+                await self._log_global_commands()
             except Exception as e:
                 logger.debug(f"Could not list global commands before sync: {e}")
             try:
                 await self._sync_commands()
                 try:
-                    await self._log_guild_commands()
+                    await self._log_global_commands()
                 except Exception as e:
                     logger.debug(f"Could not list global commands after sync: {e}")
                 self._commands_synced = True
             except Exception as e:
-                logger.error(f"❌ Command sync after ready failed: {e}")
+                logger.exception("❌ Command sync after ready failed")
 
         try:
             await self.change_presence(
@@ -128,7 +128,7 @@ class RenderOptimizedBot(commands.Bot):
         self.startup_complete = True
         self.last_heartbeat = time.time()
 
-    async def _log_guild_commands(self):
+    async def _log_global_commands(self):
         # diagnostic to list what Discord commands are synced globally
         try:
             app_info = await self.application_info()
@@ -165,7 +165,7 @@ class RenderOptimizedBot(commands.Bot):
                 await session.close()
 
         except Exception as e:
-            logger.exception(f"🔍 Error while fetching global commands: {e}")
+            logger.exception("🔍 Error while fetching global commands")
 
     async def on_resumed(self):
         logger.info("🔄 Bot resumed connection")

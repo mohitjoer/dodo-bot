@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from urllib.parse import quote_plus
 
@@ -201,13 +201,13 @@ class GitHubCog(commands.Cog):
         interaction: discord.Interaction,
         date_range: str,
         type: str,
-        language: str = None
+        language: str | None = None
     ):
         try:
             await interaction.response.defer()
 
             # Calculate date based on range
-            today = datetime.utcnow()
+            today = datetime.now(timezone.utc)
             if date_range == "today":
                 since_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
                 range_label = "Today"
@@ -460,11 +460,11 @@ class GitHubCog(commands.Cog):
                 return
 
         except Exception as e:
-            logger.error(f"github_trending command error: {e}")
+            logger.exception("github_trending command error")
             try:
                 await interaction.followup.send("❌ An error occurred while fetching trending data.")
-            except:
-                pass
+            except Exception:
+                logger.debug("Failed to send error message to user")
 
     @app_commands.command(name="github_tree", description="Show a repository file tree (owner/repo or URL)")
     @app_commands.describe(repo="Repository (owner/repo) or GitHub URL", max_depth="Max depth to display")
