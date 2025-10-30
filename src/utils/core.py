@@ -79,18 +79,14 @@ class RenderOptimizedBot(commands.Bot):
             logger.info("🔄 Delaying command sync for Render environment...")
 
     async def _sync_commands(self):
-        if self.target_guild_id:
-            guild = discord.Object(id=self.target_guild_id)
-            try:
-                # Log what commands the tree currently exposes for debugging
-                available = list(self.tree.get_commands())
-                logger.info(f"🔎 About to sync {len(available)} commands: {[c.name for c in available]}")
-                synced = await self.tree.sync(guild=guild)
-                logger.info(f"✅ Synced {len(synced)} commands to guild {self.target_guild_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to sync commands: {e}")
-        else:
-            logger.warning("⚠️ GUILD_ID not set, skipping command sync")
+        try:
+            # Log what commands the tree currently exposes for debugging
+            available = list(self.tree.get_commands())
+            logger.info(f"🔎 About to sync {len(available)} commands globally: {[c.name for c in available]}")
+            synced = await self.tree.sync()
+            logger.info(f"✅ Synced {len(synced)} commands globally")
+        except Exception as e:
+            logger.exception("❌ Failed to sync commands")
 
     async def on_ready(self):
         logger.info(f"🚀 Bot ready! {self.user} connected to Discord")
@@ -100,27 +96,26 @@ class RenderOptimizedBot(commands.Bot):
             target_guild = self.get_guild(self.target_guild_id)
             if target_guild:
                 logger.info(f"✅ Connected to target guild: {target_guild.name}")
-
-                # Ensure commands are synced after cogs have been loaded.
-
-                if not self._commands_synced:
-                    logger.info("🔄 Syncing commands after successful connection...")
-                    await asyncio.sleep(3)
-                    try:
-                        await self._log_guild_commands()
-                    except Exception as e:
-                        logger.debug(f"Could not list guild commands before sync: {e}")
-                    try:
-                        await self._sync_commands()
-                        try:
-                            await self._log_guild_commands()
-                        except Exception as e:
-                            logger.debug(f"Could not list guild commands after sync: {e}")
-                        self._commands_synced = True
-                    except Exception as e:
-                        logger.error(f"❌ Command sync after ready failed: {e}")
             else:
                 logger.warning(f"⚠️ Not in target guild {self.target_guild_id}")
+
+        # Ensure commands are synced globally after cogs have been loaded
+        if not self._commands_synced:
+            logger.info("🔄 Syncing commands globally after successful connection...")
+            await asyncio.sleep(3)
+            try:
+                await self._log_global_commands()
+            except Exception as e:
+                logger.debug(f"Could not list global commands before sync: {e}")
+            try:
+                await self._sync_commands()
+                try:
+                    await self._log_global_commands()
+                except Exception as e:
+                    logger.debug(f"Could not list global commands after sync: {e}")
+                self._commands_synced = True
+            except Exception as e:
+                logger.exception("❌ Command sync after ready failed")
 
         try:
             await self.change_presence(
@@ -133,12 +128,8 @@ class RenderOptimizedBot(commands.Bot):
         self.startup_complete = True
         self.last_heartbeat = time.time()
 
-    async def _log_guild_commands(self):
-        # diagnostic to list what Discord commands are in synced
-        if not self.target_guild_id:
-            logger.info("🔍 No target guild id set; skipping guild command listing")
-            return
-
+    async def _log_global_commands(self):
+        # diagnostic to list what Discord commands are synced globally
         try:
             app_info = await self.application_info()
             app_id = getattr(app_info, 'id', None)
@@ -146,7 +137,7 @@ class RenderOptimizedBot(commands.Bot):
                 logger.warning("🔍 Could not determine application id for diagnostics")
                 return
 
-            url = f"https://discord.com/api/v10/applications/{app_id}/guilds/{self.target_guild_id}/commands"
+            url = f"https://discord.com/api/v10/applications/{app_id}/commands"
             token = os.getenv('DISCORD_TOKEN')
             if not token:
                 logger.warning("🔍 DISCORD_TOKEN not available in environment for diagnostic request")
@@ -161,20 +152,20 @@ class RenderOptimizedBot(commands.Bot):
                     data = await resp.json()
                 except Exception:
                     text = await resp.text()
-                    logger.exception(f"🔍 Failed to parse guild commands response (status={resp.status}): {text}")
+                    logger.exception(f"🔍 Failed to parse global commands response (status={resp.status}): {text}")
                     return
 
             if isinstance(data, list):
                 names = [c.get('name') for c in data]
-                logger.info(f"🔍 Discord guild has {len(data)} registered app commands: {names}")
+                logger.info(f"🔍 Discord has {len(data)} registered global app commands: {names}")
             else:
-                logger.info(f"🔍 Unexpected guild commands payload: {data}")
+                logger.info(f"🔍 Unexpected global commands payload: {data}")
 
             if self.session is None:
                 await session.close()
 
         except Exception as e:
-            logger.exception(f"🔍 Error while fetching guild commands: {e}")
+            logger.exception("🔍 Error while fetching global commands")
 
     async def on_resumed(self):
         logger.info("🔄 Bot resumed connection")

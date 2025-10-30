@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+from datetime import datetime, timedelta, timezone
 
 from urllib.parse import quote_plus
 
@@ -179,6 +180,291 @@ class GitHubCog(commands.Cog):
                 await interaction.followup.send("❌ An error occurred while searching repositories.")
             except:
                 pass
+
+    @app_commands.command(name="github_trending", description="Show trending GitHub repositories or developers")
+    @app_commands.describe(
+        date_range="Time period for trending (today, this_week, this_month)",
+        type="Show trending repositories or developers",
+        language="Programming language filter (leave empty for ALL languages)"
+    )
+    @app_commands.choices(date_range=[
+        app_commands.Choice(name="Today", value="today"),
+        app_commands.Choice(name="This Week", value="this_week"),
+        app_commands.Choice(name="This Month", value="this_month")
+    ])
+    @app_commands.choices(type=[
+        app_commands.Choice(name="Repositories", value="repositories"),
+        app_commands.Choice(name="Developers", value="developers")
+    ])
+    async def github_trending(
+        self,
+        interaction: discord.Interaction,
+        date_range: str,
+        type: str,
+        language: str | None = None
+    ):
+        try:
+            await interaction.response.defer()
+
+            # Calculate date based on range
+            today = datetime.now(timezone.utc)
+            if date_range == "today":
+                since_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+                range_label = "Today"
+            elif date_range == "this_week":
+                since_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+                range_label = "This Week"
+            elif date_range == "this_month":
+                since_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+                range_label = "This Month"
+            else:
+                await interaction.followup.send("❌ Invalid date range selected.")
+                return
+
+            if type == "repositories":
+                # Build search query for trending repositories
+                query_parts = [f"created:>={since_date}"]
+                if language:
+                    query_parts.append(f"language:{language}")
+
+                query = " ".join(query_parts)
+                search_url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=3"
+
+                data = await github_request(self.bot, search_url)
+
+                if data == "rate_limited":
+                    await interaction.followup.send("❌ GitHub API rate limit exceeded. Please try again later.")
+                    return
+                elif data == "not_found":
+                    await interaction.followup.send("❌ Could not fetch trending data from GitHub.")
+                    return
+                elif not data or not isinstance(data, dict):
+                    lang_text = f" for {language}" if language else ""
+                    await interaction.followup.send(f"❌ No trending repositories found{lang_text} for {range_label.lower()}.")
+                    return
+
+                # Safely get items list
+                items = data.get("items", [])
+                if not items or not isinstance(items, list):
+                    lang_text = f" for {language}" if language else ""
+                    await interaction.followup.send(f"❌ No trending repositories found{lang_text} for {range_label.lower()}.")
+                    return
+
+                # Create embed for repositories
+                lang_text = f" - {language.title()}" if language else " - All Languages"
+                embed = discord.Embed(
+                    title=f"🔥 Trending Repositories{lang_text}",
+                    description=f"**Top {len(items)} trending repos from {range_label.lower()}**\n",
+                    color=0x2F3136,
+                )
+
+                repo_entries = []
+                for i, repo in enumerate(items[:3], start=1):
+                    name = repo.get("name", "N/A")
+                    owner = repo.get("owner", {}).get("login", "N/A")
+                    full_name = f"{owner}/{name}"
+                    description = repo.get("description", "No description available.")
+                    if description and len(description) > 120:
+                        description = description[:120] + "..."
+
+                    stars = format_number(repo.get("stargazers_count", 0))
+                    forks = format_number(repo.get("forks_count", 0))
+                    # Note: open_issues_count includes both issues AND open PRs
+                    open_issues_and_prs = repo.get("open_issues_count", 0)
+                    repo_url = repo.get("html_url", "")
+
+                    # Fetch all languages used in the repository
+                    languages_url = f"https://api.github.com/repos/{owner}/{name}/languages"
+                    lang_data = await github_request(self.bot, languages_url)
+
+                    if lang_data and isinstance(lang_data, dict) and lang_data not in ["rate_limited", "not_found"]:
+                        # Get top languages sorted by bytes
+                        sorted_langs = sorted(lang_data.items(), key=lambda x: x[1], reverse=True)
+                        # Take top 5 languages or all if less than 5
+                        top_langs = [lang[0] for lang in sorted_langs[:5]]
+                        languages_text = ", ".join(top_langs) if top_langs else "N/A"
+                    else:
+                        # Fallback to primary language
+                        languages_text = repo.get("language", "N/A")
+
+                    # Fetch total PRs count
+                    search_prs_url = f"https://api.github.com/search/issues?q=repo:{owner}/{name}+type:pr"
+                    prs_data = await github_request(self.bot, search_prs_url)
+
+                    if prs_data and isinstance(prs_data, dict) and prs_data not in ["rate_limited", "not_found"]:
+                        total_prs = prs_data.get('total_count', 0)
+                        total_prs_formatted = format_number(total_prs)
+                    else:
+                        total_prs = 0
+                        total_prs_formatted = "N/A"
+
+                    # Fetch open PRs count to calculate actual open issues
+                    search_open_prs_url = f"https://api.github.com/search/issues?q=repo:{owner}/{name}+type:pr+state:open"
+                    open_prs_data = await github_request(self.bot, search_open_prs_url)
+
+                    if open_prs_data and isinstance(open_prs_data, dict) and open_prs_data not in ["rate_limited", "not_found"]:
+                        open_prs_count = open_prs_data.get('total_count', 0)
+                    else:
+                        open_prs_count = 0
+
+                    # Calculate actual open issues (open_issues_count includes open PRs, so subtract them)
+                    actual_open_issues = max(0, open_issues_and_prs - open_prs_count)
+                    open_issues = format_number(actual_open_issues)
+
+                    entry = (
+                        f"### {i}. [{full_name}]({repo_url})\n"
+                        f"> {description}\n"
+                        f"> \n"
+                        f"> ⭐ **{stars}** Stars  •  🍴 **{forks}** Forks  •  🔀 **{total_prs_formatted}** PRs  •  🐛 **{open_issues}** Open Issues\n"
+                        f"> 🗣️ **Languages:** {languages_text}\n"
+                    )
+                    repo_entries.append(entry)
+
+                # Combine all entries with separators
+                separator = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                embed.description += separator.join(repo_entries)
+
+                total_count = data.get('total_count', 0) or 0
+                embed.set_footer(text=f"Total results: {total_count:,} | Powered by GitHub API")
+                await interaction.followup.send(embed=embed)
+
+            elif type == "developers":
+                # For developers, we search for users who created popular repos recently
+                query_parts = [f"created:>={since_date}", "stars:>10"]  # Repos with at least 10 stars
+                if language:
+                    query_parts.append(f"language:{language}")
+
+                query = " ".join(query_parts)
+                search_url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=10"
+
+                data = await github_request(self.bot, search_url)
+
+                if data == "rate_limited":
+                    await interaction.followup.send("❌ GitHub API rate limit exceeded. Please try again later.")
+                    return
+                elif data == "not_found":
+                    await interaction.followup.send("❌ Could not fetch trending data from GitHub.")
+                    return
+                elif not data or not isinstance(data, dict):
+                    lang_text = f" for {language}" if language else ""
+                    await interaction.followup.send(f"❌ No trending developers found{lang_text} for {range_label.lower()}.")
+                    return
+
+                # Safely get items list
+                items = data.get("items", [])
+                if not items or not isinstance(items, list):
+                    lang_text = f" for {language}" if language else ""
+                    await interaction.followup.send(f"❌ No trending developers found{lang_text} for {range_label.lower()}.")
+                    return
+
+                # Extract unique developers from the repos
+                developers_map = {}
+                for repo in items:
+                    if not isinstance(repo, dict):
+                        continue
+                    owner = repo.get("owner", {})
+                    login = owner.get("login")
+                    if login and login not in developers_map:
+                        developers_map[login] = {
+                            "login": login,
+                            "avatar_url": owner.get("avatar_url"),
+                            "html_url": owner.get("html_url"),
+                            "repo_name": repo.get("name"),
+                            "repo_url": repo.get("html_url"),
+                            "repo_stars": repo.get("stargazers_count", 0),
+                            "repo_description": repo.get("description", "No description")
+                        }
+
+                    if len(developers_map) >= 3:
+                        break
+
+                if not developers_map:
+                    await interaction.followup.send(f"❌ No trending developers found for {range_label.lower()}.")
+                    return
+
+                # Create embeds for developers - one per developer to show profile pics
+                lang_text = f" - {language.title()}" if language else " - All Languages"
+
+                embeds = []
+                for i, (login, dev) in enumerate(developers_map.items(), start=1):
+                    repo_desc = dev.get("repo_description", "No description")
+                    if repo_desc and len(repo_desc) > 100:
+                        repo_desc = repo_desc[:100] + "..."
+
+                    profile_url = dev.get('html_url', '#')
+                    repo_name = dev.get('repo_name', 'N/A')
+                    repo_url = dev.get('repo_url', '#')
+                    repo_stars = format_number(dev.get('repo_stars', 0))
+
+                    # Fetch detailed user information
+                    user_data = await github_request(self.bot, f"https://api.github.com/users/{login}")
+
+                    if user_data and isinstance(user_data, dict) and user_data not in ["rate_limited", "not_found"]:
+                        followers = format_number(user_data.get('followers', 0))
+                        following = format_number(user_data.get('following', 0))
+                        public_repos = format_number(user_data.get('public_repos', 0))
+                        avatar_url = user_data.get('avatar_url', '')
+                    else:
+                        # Fallback to basic data
+                        followers = "N/A"
+                        following = "N/A"
+                        public_repos = "N/A"
+                        avatar_url = dev.get('avatar_url', '')
+
+                    # Create individual embed for each developer - all with titles for consistent width
+                    if i == 1:
+                        # First embed includes the main header
+                        embed_title = f"🔥 Trending Developers{lang_text} - #{i}"
+                        embed_desc = (
+                            f"**Top {len(developers_map)} developers with popular repos from {range_label.lower()}**\n\n"
+                            f"### [{login}]({profile_url})\n"
+                            f"> 👥 **{followers}** Followers  •  **{following}** Following  •  📦 **{public_repos}** Repos\n"
+                            f"> \n"
+                            f"> 🔥 **Popular Repo:** [{repo_name}]({repo_url})  •  ⭐ **{repo_stars}** Stars\n"
+                            f"> \n"
+                            f"> _{repo_desc}_"
+                        )
+                    else:
+                        # Subsequent embeds with consistent title format
+                        embed_title = f"🔥 Trending Developers{lang_text} - #{i}"
+                        embed_desc = (
+                            f"### [{login}]({profile_url})\n"
+                            f"> 👥 **{followers}** Followers  •  **{following}** Following  •  📦 **{public_repos}** Repos\n"
+                            f"> \n"
+                            f"> 🔥 **Popular Repo:** [{repo_name}]({repo_url})  •  ⭐ **{repo_stars}** Stars\n"
+                            f"> \n"
+                            f"> _{repo_desc}_"
+                        )
+
+                    embed = discord.Embed(
+                        title=embed_title,
+                        description=embed_desc,
+                        color=0x2F3136,
+                    )
+
+                    # Set profile picture as thumbnail
+                    if avatar_url:
+                        embed.set_thumbnail(url=avatar_url)
+
+                    # Only add footer to last embed
+                    if i == len(developers_map):
+                        embed.set_footer(text=f"Based on repos created in {range_label.lower()} | Powered by GitHub API")
+
+                    embeds.append(embed)
+
+                # Send all embeds
+                await interaction.followup.send(embeds=embeds)
+
+            else:
+                await interaction.followup.send("❌ Invalid type selected. Choose 'repositories' or 'developers'.")
+                return
+
+        except Exception as e:
+            logger.exception("github_trending command error")
+            try:
+                await interaction.followup.send("❌ An error occurred while fetching trending data.")
+            except Exception:
+                logger.debug("Failed to send error message to user")
 
     @app_commands.command(name="github_tree", description="Show a repository file tree (owner/repo or URL)")
     @app_commands.describe(repo="Repository (owner/repo) or GitHub URL", max_depth="Max depth to display")
