@@ -806,6 +806,68 @@ async def sync_commands(interaction: discord.Interaction):
         except:
             pass
 
+@bot.tree.command(name="force_sync", description="Force sync all commands globally (Owner only)")
+async def force_sync(interaction: discord.Interaction):
+    """Force sync commands globally - use only if guild sync isn't working"""
+    try:
+        # Check if user is bot owner or server admin
+        if not (interaction.user.guild_permissions.administrator or interaction.user.id == YOUR_USER_ID):
+            await interaction.response.send_message("❌ Only administrators can use this command!", ephemeral=True)
+            return
+            
+        await interaction.response.defer(ephemeral=True)
+        
+        # Sync globally (takes up to 1 hour to appear)
+        synced = await bot.tree.sync()
+        await interaction.followup.send(f"✅ Synced {len(synced)} commands globally! They may take up to 1 hour to appear.", ephemeral=True)
+        
+    except Exception as e:
+        logger.error(f"force_sync error: {e}")
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+@bot.tree.command(name="say_hi", description="Bot says hi to you!")
+async def say_hi(interaction: discord.Interaction):
+    """Simple command that makes the bot say hi"""
+    try:
+        await interaction.response.defer()
+        
+        # Create a friendly embed
+        embed = discord.Embed(
+            title="👋 Hello there!",
+            description=f"Hi {interaction.user.mention}! 😊",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="🤖 Bot Status", 
+            value="I'm online and ready to help!", 
+            inline=True
+        )
+        
+        embed.add_field(
+            name="💡 Tip", 
+            value="Try `/ping` or `/github_user` commands!", 
+            inline=True
+        )
+        
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        embed.set_footer(
+            text=f"Hello from {bot.user.name}!", 
+            icon_url=bot.user.avatar.url if bot.user.avatar else None
+        )
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"say_hi command error: {e}")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("👋 Hi there! (Error occurred with embed)", ephemeral=True)
+            else:
+                await interaction.followup.send("👋 Hi there! (Error occurred with embed)", ephemeral=True)
+        except:
+            pass
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     """Enhanced error handler for slash commands"""
