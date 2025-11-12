@@ -806,12 +806,12 @@ async def sync_commands(interaction: discord.Interaction):
         except:
             pass
 
-@bot.tree.command(name="force_sync", description="Force sync all commands globally (Owner only)")
+@bot.tree.command(name="force_sync", description="Force sync all commands globally (Admin only)")
 async def force_sync(interaction: discord.Interaction):
     """Force sync commands globally - use only if guild sync isn't working"""
     try:
-        # Check if user is bot owner or server admin
-        if not (interaction.user.guild_permissions.administrator or interaction.user.id == YOUR_USER_ID):
+        # Check if user is server admin (removed YOUR_USER_ID reference)
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Only administrators can use this command!", ephemeral=True)
             return
             

@@ -1,23 +1,30 @@
-# Use official Python image as base
+# Use Python 3.11 slim image
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
-COPY requirements.txt ./
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for better caching)
+COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy application code
 COPY . .
 
-# Set environment variables (optional)
-ENV PYTHONUNBUFFERED=1
+# Expose port for health checks
+EXPOSE 5000
 
-# Command to run the bot
+# Run the bot
 CMD ["python", "bot.py"]
 
 
 
 # to build : docker build -t dodo-bot .
-# to run : docker run --rm dodo-bot 
+# to run : docker run --rm dodo-bot
